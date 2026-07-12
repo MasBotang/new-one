@@ -1,0 +1,477 @@
+Redesign the entire POS (Point of Sale) page into a premium modern cashier experience.
+
+IMPORTANT:
+This is NOT an admin dashboard.
+This page is used continuously by cashiers for 8–12 hours every day.
+Everything must prioritize speed, clarity, and comfort while still looking premium.
+
+Follow exactly the same design language already used in the new Sales Home page and Sidebar.
+
+DO NOT change any business logic.
+DO NOT change routes.
+DO NOT change APIs.
+DO NOT remove existing functionality.
+Only redesign the UI/UX.
+
+====================================================
+GLOBAL DESIGN LANGUAGE
+====================================================
+
+Use the Risol Yuk design system consistently.
+
+• Background:
+  warm cream (#FCF8F2)
+
+• Primary:
+  luxury maroon gradient
+
+• Accent:
+  warm gold
+
+• Radius:
+  18–20px
+
+• Shadow:
+  very soft
+  never heavy
+
+• Borders:
+  almost invisible
+
+• Plenty of whitespace
+
+• Elegant spacing
+
+• Premium typography
+
+• No oversized fonts
+
+• Keep everything clean.
+
+The UI should feel like:
+
+- Shopify POS
+- Square POS
+- Apple Store POS
+- Toast POS
+
+NOT like a traditional ERP dashboard.
+
+====================================================
+GENERAL LAYOUT
+====================================================
+
+Maintain 2-column layout.
+
+LEFT
+Product browsing
+
+RIGHT
+Order / Cart
+
+The cart must remain fixed while browsing products.
+
+The product area should occupy around 70%.
+
+Cart around 30%.
+
+====================================================
+HEADER
+====================================================
+
+Keep the new premium header.
+
+Greeting:
+
+Selamat datang kembali, {LoggedInUserName} 👋
+
+The name MUST come dynamically from authenticated user.
+
+Subtitle:
+
+Mulai transaksi dengan cepat.
+
+Keep:
+
+Current date
+
+Outlet Utama chip
+
+Notification icon
+
+No breadcrumbs.
+
+====================================================
+SEARCH
+====================================================
+
+Search bar becomes much more premium.
+
+Large rounded search box.
+
+Height around 54px.
+
+Placeholder:
+
+Cari nama produk, SKU, barcode...
+
+Add:
+
+Search icon
+
+Shortcut badge:
+
+F2
+
+Smooth shadow.
+
+====================================================
+CATEGORY FILTER
+====================================================
+
+Transform categories into premium pills.
+
+Rounded.
+
+Horizontal scroll.
+
+Selected category:
+
+Maroon gradient
+
+White icon
+
+White text
+
+Inactive:
+
+Warm white
+
+Small shadow
+
+Spacing around 12px.
+
+Much more elegant than current version.
+
+====================================================
+PRODUCT GRID
+====================================================
+
+This is the MOST IMPORTANT section.
+
+Redesign product cards completely.
+
+Current cards are too plain.
+
+The product image must become the hero.
+
+Use the transparent PNG product assets.
+
+Image occupies approximately 65–70% of card.
+
+Information occupies only 30–35%.
+
+Remove unnecessary category badge because category is already selected above.
+
+Each card contains ONLY:
+
+Product Image
+
+Product Name
+
+Price
+
+Nothing else.
+
+Card ratio:
+
+Around
+
+170–180px width
+
+220–240px height
+
+Very elegant.
+
+Very minimal.
+
+Rounded 18px.
+
+Soft shadow.
+
+Hover:
+
+Lift 3px
+
+Shadow slightly stronger
+
+Selected:
+
+Small check badge
+
+or quantity badge
+
+NOT thick red border.
+
+====================================================
+PRODUCT IMAGE
+====================================================
+
+Use PNG transparent assets.
+
+Allow image to slightly overflow the card.
+
+Give breathing space.
+
+Never crop product.
+
+The image should visually become the main attraction.
+
+Products should immediately attract attention.
+
+====================================================
+PRICE
+====================================================
+
+Large enough.
+
+Brand red.
+
+Bold.
+
+Easy to scan.
+
+====================================================
+ORDER PANEL
+====================================================
+
+Completely polish the cart.
+
+Section title:
+
+Pesanan Saat Ini
+
+Use premium card sections.
+
+Customer
+
+Phone
+
+Notes
+
+Source Order
+
+Each section:
+
+Rounded
+
+Cream background
+
+Minimal borders
+
+Better spacing
+
+Better typography
+
+====================================================
+EMPTY CART
+====================================================
+
+Instead of plain empty state.
+
+Show branded illustration.
+
+Use Risol Yuk decorative asset.
+
+Text:
+
+Keranjang masih kosong
+
+Tambahkan produk untuk memulai transaksi.
+
+====================================================
+ORDER ITEMS
+====================================================
+
+When products exist:
+
+Each item appears inside rounded cards.
+
+Show:
+
+Image
+
+Name
+
+Variant
+
+Qty Stepper
+
+Price
+
+Subtotal
+
+Delete icon
+
+Quantity controls become elegant circular buttons.
+
+====================================================
+TOTAL SECTION
+====================================================
+
+Grand Total should become a premium sticky section.
+
+Large typography.
+
+Soft cream background.
+
+Thin divider.
+
+Button:
+
+Bayar
+
+Large
+
+Gradient
+
+Rounded
+
+Sticky at bottom.
+
+====================================================
+PAY BUTTON
+====================================================
+
+Primary CTA.
+
+Full width.
+
+56px height.
+
+Luxury maroon gradient.
+
+Hover:
+
+Slight glow
+
+Tiny lift
+
+Disabled state:
+
+Soft gray.
+
+====================================================
+SHORTCUTS
+====================================================
+
+Keyboard shortcut badges become elegant pills.
+
+Example:
+
+F2
+
+F4
+
+Enter
+
+Use muted cream background.
+
+====================================================
+ANIMATIONS
+====================================================
+
+Micro interactions only.
+
+Hover
+
+150ms
+
+Card lift
+
+Button press
+
+Smooth opacity
+
+Scale 0.98 on click
+
+Never flashy.
+
+====================================================
+BOTANICAL BRANDING
+====================================================
+
+Use subtle botanical line art only.
+
+Very low opacity.
+
+Decorate:
+
+Bottom corner
+
+Hero card
+
+Empty state
+
+Never distract from cashier workflow.
+
+====================================================
+RESPONSIVE
+====================================================
+
+Desktop first.
+
+Large screens:
+
+More products per row.
+
+Laptop:
+
+Maintain balance.
+
+Tablet:
+
+Graceful reduction.
+
+No layout breaking.
+
+====================================================
+PERFORMANCE
+====================================================
+
+Do not introduce unnecessary re-renders.
+
+Keep lazy loading.
+
+Keep virtualization if already exists.
+
+Do not affect POS performance.
+
+====================================================
+ACCESSIBILITY
+====================================================
+
+Clear focus states.
+
+Keyboard friendly.
+
+Large clickable targets.
+
+High contrast text.
+
+====================================================
+IMPORTANT
+
+This redesign should make users immediately feel:
+
+"This POS looks like a modern premium SaaS product."
+
+Everything should feel polished.
+
+Every spacing should be intentional.
+
+Every shadow subtle.
+
+Every component consistent.
+
+The final result should be worthy of a premium commercial POS product rather than a generic admin dashboard.
