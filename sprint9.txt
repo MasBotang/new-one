@@ -1,0 +1,251 @@
+# SPRINT 9 — Fix: PO dengan DP Membuat 2 Sale, Menyebabkan Omset/COGS/Stok
+# Ter-double-count
+
+## Sprint Objective
+Perbaiki bug di mana SETIAP Pre Order yang dibuat dengan DP (Down Payment)
+di POS menghasilkan DUA record Sale terpisah untuk satu order yang sama —
+satu saat PO dibuat (mencatat DP), satu lagi saat PO di-Complete (mencatat
+pelunasan penuh). Akibatnya: omset ter-hitung 2×, COGS ter-hitung 2× penuh
+(bukan proporsional), dan Ready Stock + packaging inventory ter-potong 2×
+untuk barang yang sama — meskipun barangnya cuma keluar sekali secara
+fisik.
+
+## Root Cause (sudah diverifikasi ke kode)
+Ada 2 titik yang masing-masing membuat Sale untuk PO yang sama:
+
+1. `src/features/pos/pos-page.tsx`, fungsi `completeSale()` (sekitar baris
+   644-763): saat kasir submit PO dengan `dpClamped > 0`, sistem memanggil
+   `preorderService.create()` (benar, ini cuma bikin record PreOrder) TAPI
+   juga memanggil `salesService.create()` dengan `total: dpClamped` dan
+   `items: cart` (list produk LENGKAP, bukan proporsional ke nilai DP).
+2. `src/features/sales/preorder-page.tsx`, fungsi `finalizeComplete()`
+   (hasil Sprint 8 — logic hitung Sale.total-nya SUDAH BENAR, total =
+   subtotal penuh): saat PO ini di-Complete, sistem memanggil
+   `salesService.create()` LAGI, dengan `items: po.items` (list produk
+   LENGKAP lagi) dan `total: subtotal` (nilai penuh).
+
+`salesService.create()` (`src/services/sales.service.ts`) TIDAK PERNAH
+mengecek apakah ini "PO yang sudah pernah punya Sale sebelumnya" — setiap
+kali dipanggil, ia SELALU memotong Ready Stock (`productService.deduct`)
+dan packaging inventory berdasarkan `sale.items`, TANPA syarat.
+
+Hasilnya untuk PO dengan DP > 0 yang di-Complete:
+- Ready Stock & packaging inventory produk yang sama terpotong 2× (sekali
+  saat PO dibuat, sekali lagi saat Complete).
+- `report.service.ts` (`aggregate()`) menjumlah SEMUA Sale yang
+  `!voided` — jadi omset yang muncul di laporan = DP + subtotal penuh
+  (harusnya cuma subtotal penuh), dan COGS = 2× COGS penuh order tersebut
+  (harusnya cuma 1×, karena Sale pertama sudah bawa `items` lengkap padahal
+  `total`-nya cuma nilai DP).
+- Field `po.saleId` di-overwrite oleh Sale kedua saat Complete
+  (`preorderService.update(po.id, {..., saleId: sale.id})`) — Sale pertama
+  jadi "yatim" (orphan): tidak terhubung ke PO manapun lagi, tapi tetap
+  hidup di storage dan tetap terhitung di semua laporan.
+- Risiko tambahan: kalau stok menipis di antara PO dibuat dan di-Complete
+  (misal karena penjualan lain), potongan stok KEDUA di titik Complete bisa
+  gagal dengan error "Ready stock tidak mencukupi" — padahal barangnya
+  sudah pernah "terjual" secara sistem sejak PO dibuat.
+
+Bug ini TIDAK terjadi untuk PO tanpa DP (`dpClamped === 0`) — jalur itu
+sudah benar: `completeSale()` di `pos-page.tsx` SENGAJA tidak membuat Sale
+sama sekali kalau DP = 0 (langsung `return` setelah `preorderService.create()`),
+jadi cuma ada 1 Sale, dibuat di titik Complete. Sprint ini menyamakan
+perilaku jalur DP > 0 supaya konsisten dengan jalur DP = 0 ini.
+
+## Pendekatan yang Dipilih (dan Kenapa)
+Ada 2 opsi yang dipertimbangkan:
+
+**Opsi A — Sale HANYA dibuat sekali, di titik Complete (DIPILIH).**
+Saat PO dibuat dengan DP > 0, JANGAN buat `Sale` sama sekali. Cukup simpan
+`downPayment`/`dpMethod` ke record `PreOrder` (mekanisme ini SUDAH BENAR di
+`preorderService.create()`, tidak perlu diubah). Sale satu-satunya untuk PO
+ini dibuat nanti di `finalizeComplete()` (logic Sprint 8, sudah benar),
+sehingga stok & omset cuma tersentuh SEKALI, persis seperti jalur PO tanpa
+DP yang sudah benar hari ini.
+
+**Opsi B — Sale tetap dibuat saat DP, tapi di-void saat Complete (DITOLAK).**
+Sale pertama (DP) di-void pakai `salesService.void()` (yang sudah otomatis
+mengembalikan stok — lihat mekanismenya di sana) begitu Sale kedua
+(Complete) dibuat. Ini DITOLAK karena `deriveStatus()` di
+`pesanan-page.tsx` menganggap SETIAP `sale.voided === true` sebagai status
+"Refund" di tampilan Pesanan — PO yang DP-nya di-void otomatis akan muncul
+ke kasir sebagai "Refund", padahal itu bukan refund customer sungguhan.
+Ini bikin bingung dan bisa salah baca sebagai ada masalah transaksi.
+
+## Business Rules to Preserve
+- DP tetap OPSIONAL saat PO dibuat — tidak berubah.
+- Popup "Nominal DP" saat bikin PO & popup "Pelunasan" saat Complete —
+  struktur dialog TIDAK berubah, hanya alur data di baliknya yang
+  diperbaiki.
+- `preorderService.create()`, `payDp()`, field `downPayment`/`dpMethod`/
+  `remainingBalance`/`dpPaidAt` — SUDAH BENAR, jangan diubah skemanya.
+- `finalizeComplete()`/`confirmSettle()` di `preorder-page.tsx` (hasil
+  Sprint 8) — logic hitung `Sale.total`/`Sale.payment`-nya SUDAH BENAR,
+  jangan diubah. Sprint ini hanya memastikan itu jadi SATU-SATUNYA titik
+  pembuatan Sale untuk PO manapun (dengan atau tanpa DP).
+- Relink Queue↔Sale (Sprint 3), validasi payment sum (Sprint 8), split
+  payment helper `src/lib/payment.ts` — semua tidak berubah.
+- PO tanpa DP (`dpClamped === 0`) — perilakunya SUDAH BENAR hari ini,
+  jangan diubah/disentuh sama sekali.
+
+## Dampak UX yang Perlu Diketahui (bukan bug baru, konsekuensi sadar)
+- **Struk/bukti saat PO dibuat dengan DP**: hari ini, setelah submit PO
+  dengan DP, muncul dialog sukses (`lastSale` di `pos-page.tsx`) yang bisa
+  dicetak sebagai struk — ini didorong oleh adanya `Sale` object. Karena
+  Sale ini dihapus dari alur, perlu pengganti: dialog sukses + cetak
+  "Bukti DP" yang sumber datanya dari `PreOrder`, BUKAN dari `Sale`.
+  Bukti ini harus terlihat JELAS beda dari struk pembelian biasa (misal
+  judul "BUKTI PEMBAYARAN DP" bukan "Struk Pembelian") — supaya tidak bisa
+  disalahgunakan customer/kasir nakal sebagai bukti pelunasan penuh.
+- **Tab "Pesanan" (real-time order tracking, `pesanan-page.tsx`)**: hari
+  ini PO dengan DP muncul di tab ini SEJAK dibuat (karena ada Sale-nya),
+  sedangkan PO tanpa DP baru muncul setelah di-Complete. Setelah fix ini,
+  KEDUANYA (dengan atau tanpa DP) baru muncul di tab "Pesanan" setelah
+  Complete — konsisten. Sebelum Complete, PO (dengan DP maupun tanpa)
+  tetap terlihat di tab kalender Pre Order (`preorder-page.tsx`,
+  `PreorderPanel`) seperti sekarang. Ini PERUBAHAN PERILAKU YANG DISENGAJA
+  — bukan regresi.
+
+## Scope
+
+**Termasuk dalam scope:**
+1. `src/features/pos/pos-page.tsx`, `completeSale()`: hapus pemanggilan
+   `salesService.create()` untuk jalur `isPreorder === true` dengan
+   `dpClamped > 0` — SAMAKAN dengan jalur `dpClamped === 0` yang sudah ada
+   (`preorderService.create()` saja, tanpa Sale, tanpa deduksi stok).
+2. Buat fungsi baru `printPreorderDpProof(po: PreOrder)` (nama boleh
+   disesuaikan) di `src/features/pos/invoice-receipt.ts` — reuse styling
+   dari `buildReceiptHtml()` tapi sumber datanya `PreOrder`, bukan `Sale`.
+   Judul dokumen: "BUKTI PEMBAYARAN DP" (bukan "Struk Pembelian"),
+   tampilkan: nama customer, no HP, tanggal PO dibuat, tanggal & jam
+   pickup, list item pesanan, nilai DP yang dibayar, metode DP, DAN
+   SISA yang harus dilunasi (`po.remainingBalance`) dengan jelas — supaya
+   dokumen ini eksplisit menandakan "belum lunas", bukan bukti transaksi
+   selesai.
+3. Hubungkan dialog sukses di `pos-page.tsx` (state `lastSale`) supaya bisa
+   menampilkan & mencetak bukti DP untuk PO baru (tanpa Sale), bukan cuma
+   untuk Sale biasa. Bisa pakai state terpisah (misal `lastPreorderDp`)
+   supaya tidak mencampur tipe `Sale` dengan `PreOrder` di satu state.
+4. Pastikan `finalizeComplete()` di `preorder-page.tsx` (Sprint 8, TIDAK
+   diubah logic-nya) tetap jadi satu-satunya titik pembuatan `Sale` untuk
+   PO — baik yang tadinya tanpa DP maupun yang tadinya dengan DP.
+5. Audit log: `preorderService.create()` SUDAH mencatat `preorder_dp_paid`
+   saat DP diisi di awal (lihat `preorder.service.ts` baris ~122-139) —
+   pastikan ini tetap jalan meskipun Sale tidak lagi dibuat di titik ini
+   (audit log ini independen dari Sale, jadi seharusnya tidak terdampak,
+   tapi WAJIB diverifikasi tetap tercatat setelah perubahan).
+
+**Di luar scope:**
+- Perubahan skema/fungsi `preorderService` (`create`, `payDp`, `update`) —
+  sudah benar, jangan disentuh.
+- Perubahan logic `finalizeComplete()`/`confirmSettle()` di
+  `preorder-page.tsx` (Sprint 8) — sudah benar, jangan disentuh.
+- Perubahan ke jalur PO TANPA DP — sudah benar, jangan disentuh.
+- Perubahan ke `salesService.create()`/`salesService.void()` — tidak perlu
+  diubah untuk sprint ini (Opsi A tidak memakai `void()` sama sekali).
+- Perubahan struk untuk Sale reguler (non-PO) atau struk hasil PO yang
+  sudah Complete — TETAP pakai `buildReceiptHtml()`/`printSaleReceipt()`
+  yang sudah ada, tidak berubah.
+- Perubahan UI dialog input DP saat bikin PO / dialog pelunasan saat
+  Complete — struktur input TIDAK berubah, hanya apa yang terjadi di balik
+  layar setelah submit yang diperbaiki (dan tambahan dialog "Bukti DP").
+
+## Implementation Requirements
+1. Baca `completeSale()` di `pos-page.tsx` secara utuh, khususnya blok
+   `if (isPreorder) { ... }` (sekitar baris 644-763), untuk memahami kedua
+   sub-jalur: `dpClamped === 0` (SUDAH BENAR, jadi acuan) dan
+   `dpClamped > 0` (yang perlu diperbaiki).
+2. Ubah sub-jalur `dpClamped > 0` supaya PERSIS mengikuti pola sub-jalur
+   `dpClamped === 0`: setelah `preorderService.create()` berhasil, JANGAN
+   panggil `salesService.create()`. Reset form/cart seperti sub-jalur yang
+   sudah ada (`setCart([])`, hapus `CART_DRAFT_KEY`, reset customer
+   fields, dst — copy pola yang sudah ada, jangan tulis ulang dari nol).
+3. Ganti pesan `toast.success(...)` untuk kasus DP > 0 supaya menyebutkan
+   nominal DP yang tercatat (mis. "Pre Order tercatat — DP {formatIDR}
+   diterima, sisa {formatIDR}").
+4. Implementasikan `printPreorderDpProof(po)` sesuai spesifikasi di poin
+   Scope #2 di atas. Pastikan fungsi ini PURE PRESENTASI (tidak menulis ke
+   storage, tidak membuat Sale, tidak menyentuh stok) — sama seperti
+   `buildReceiptHtml()` yang sudah ada sekarang.
+5. Tambahkan state baru di `pos-page.tsx` (mis. `lastPreorderDp: PreOrder |
+   null`) yang di-set setelah `preorderService.create()` sukses untuk
+   kasus `dpClamped > 0`, dipakai buat munculkan dialog sukses dengan
+   tombol cetak bukti DP (bisa reuse dialog `lastSale` yang ada dengan
+   percabangan render, atau dialog terpisah — pilih yang paling minim
+   mengubah struktur dialog yang sudah ada).
+6. Pastikan `finalizeComplete()`/`confirmSettle()` di `preorder-page.tsx`
+   TIDAK PERLU diubah sama sekali — verifikasi ini dengan menjalankan
+   ulang Validation Checklist dari Sprint 8 (lihat file `sprint_8.txt`)
+   sebagai bagian dari regression check sprint ini.
+7. Untuk PO yang SUDAH TERLANJUR dibuat dengan DP SEBELUM fix ini
+   dipasang (data lama di localStorage yang sudah ada 2 Sale per PO):
+   sprint ini TIDAK WAJIB migrasi data lama secara otomatis (localStorage,
+   tidak ada batch migration tool) — cukup laporkan di akhir sprint berapa
+   banyak Sale yang berpotensi jadi "orphan" ganda ini ada di storage
+   development saat ini (untuk keputusan manual: hapus manual lewat
+   DevTools atau dibiarkan karena masih tahap development).
+
+## Constraints
+- JANGAN mengubah skema/fungsi `preorder.service.ts` yang sudah benar.
+- JANGAN mengubah logic `finalizeComplete()`/`confirmSettle()` (Sprint 8).
+- JANGAN mengubah jalur PO tanpa DP (`dpClamped === 0`) — itu acuan yang
+  benar untuk sprint ini.
+- JANGAN memakai `salesService.void()` untuk sprint ini (itu Opsi B yang
+  ditolak — punya efek samping "Refund" palsu di tab Pesanan).
+- JANGAN membuat Sale APAPUN di titik PO dibuat, untuk DP berapapun
+  nilainya (0 atau > 0) — SATU PO = SATU Sale, dibuat HANYA di titik
+  Complete.
+- JANGAN mengubah `buildReceiptHtml()`/`printSaleReceipt()` yang sudah ada
+  untuk Sale biasa — buat fungsi BARU untuk bukti DP, jangan modifikasi
+  fungsi lama supaya menerima `PreOrder` (tipe datanya beda, jangan
+  dipaksakan satu fungsi untuk dua tipe).
+- JANGAN memperkenalkan backend/API baru — tetap localStorage.
+
+## Validation Checklist
+- [ ] PO dibuat TANPA DP: tidak ada perubahan perilaku — masih 1 Sale,
+      dibuat di titik Complete (regression check, harus tetap sama persis
+      seperti sebelum sprint ini).
+- [ ] PO dibuat DENGAN DP (mis. DP 30rb dari total 100rb): setelah submit,
+      TIDAK ADA Sale baru di storage (`salesService.list()` tidak
+      bertambah), Ready Stock & packaging TIDAK berkurang sama sekali di
+      titik ini, `preorderService.list()` menunjukkan PO baru dengan
+      `downPayment: 30000`, `remainingBalance: 70000`.
+- [ ] Dialog sukses setelah bikin PO dengan DP menampilkan opsi cetak
+      "Bukti Pembayaran DP" yang jelas berbeda dari struk Sale biasa
+      (judul, tidak ada label "LUNAS"/"Struk Pembelian").
+- [ ] PO dengan DP di atas, saat di-Complete: PERSIS SATU Sale baru
+      dibuat, `Sale.total` = 100rb (bukan 130rb, bukan 0), Ready Stock &
+      packaging berkurang TEPAT SATU KALI untuk item-item di order
+      tersebut (bandingkan stok SEBELUM PO dibuat vs SETELAH Complete —
+      selisihnya harus sama dengan qty di order, bukan 2×).
+- [ ] `report.service.ts` (`today()`, `last7()`): omset & profit dari PO
+      dengan DP yang sudah Complete sekarang AKURAT (= subtotal penuh
+      order, bukan subtotal + DP, bukan 2× COGS).
+- [ ] Shift Management → Packaging Usage (`PackagingUsageCard`): angka
+      auto-prefill dari `sales_packaging_usage` untuk PO dengan DP yang
+      Complete dalam shift yang sama sekarang menunjukkan jumlah packaging
+      yang BENAR (1× pemakaian, bukan 2×).
+- [ ] Tab "Pesanan": PO dengan DP yang BELUM di-Complete tidak muncul di
+      tab ini (konsisten dengan PO tanpa DP) — tapi tetap terlihat di tab
+      kalender Pre Order. Setelah Complete, muncul normal di tab Pesanan
+      seperti PO lain.
+- [ ] Audit log `preorder_dp_paid` tetap tercatat saat PO dibuat dengan DP
+      (tidak hilang akibat perubahan ini).
+- [ ] Tidak ada regresi pada checkout POS non-PO (split payment biasa,
+      cetak struk, cart auto-save) — semua tetap berjalan seperti
+      sebelumnya.
+- [ ] Tidak ada regresi pada seluruh Validation Checklist Sprint 8 (lihat
+      `sprint_8.txt`) — jalankan ulang sebagai regression suite.
+- [ ] Laporkan jumlah Sale "orphan" (hasil bug lama, PO dengan DP yang
+      sudah pernah di-Complete SEBELUM fix ini dipasang) yang ditemukan di
+      data development saat ini, untuk keputusan manual pembersihan.
+
+## Completion Criteria
+Sprint ini selesai ketika SETIAP Pre Order — dengan DP maupun tanpa DP —
+menghasilkan TEPAT SATU record Sale sepanjang siklus hidupnya (dibuat
+hanya di titik Complete), sehingga omset, COGS, dan pengurangan Ready
+Stock/packaging inventory masing-masing tersentuh TEPAT SATU KALI per
+order. Kasir tetap mendapat bukti tercetak saat DP diterima (via dokumen
+baru "Bukti Pembayaran DP", bukan Sale), dan seluruh Validation Checklist
+Sprint 8 tetap lulus tanpa regresi. Seluruh item Validation Checklist di
+atas tercentang.
